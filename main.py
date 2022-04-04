@@ -206,7 +206,7 @@ class PlaceClient:
         }
 
         if self.dry:
-            return 3600
+            return 3600, True
 
         response = requests.request(
             "POST",
