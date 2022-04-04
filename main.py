@@ -28,7 +28,8 @@ class PlaceClient:
         self.json_data = utils.get_json_data(self, config_path)
         self.pixel_x_start: int = self.json_data["image_start_coords"][0]
         self.pixel_y_start: int = self.json_data["image_start_coords"][1]
-        self.recently_placed = []
+        self.board = None
+        self.board_expires_at = 0
 
         self.dry = dry
 
@@ -73,8 +74,6 @@ class PlaceClient:
         # Initialize-functions
         utils.load_image(self)
 
-        self.waiting_thread_index = -1
-
     """ Main """
     # Obtain access token
 
@@ -92,7 +91,7 @@ class PlaceClient:
             )
         ):
             if not self.compactlogging:
-                logger.info("Thread #{} :: Refreshing access token", index)
+                logger.info("Worker #{} :: Refreshing access token", index)
 
             # developer's reddit username and password
             try:
@@ -154,7 +153,6 @@ class PlaceClient:
                     self.access_tokens.get(index)[0][:5],
                 )
 
-
     # Draw a pixel at an x, y coordinate in r/place with a specific color
 
     def set_pixel_and_check_ratelimit(
@@ -170,8 +168,10 @@ class PlaceClient:
         # canvas structure:
         # 0 | 1
         # 2 | 3
+        success = False
+
         logger.warning(
-            "Thread #{} - {}: Attempting to place {} pixel at {}, {}",
+            "Worker #{} - {}: Attempting to place {} pixel at {}, {}",
             thread_index,
             name,
             ColorMapper.color_id_to_name(color_index_in),
@@ -216,10 +216,8 @@ class PlaceClient:
             proxies=proxy.get_random_proxy(self),
         )
         logger.debug(
-            "Thread #{} - {}: Received response: {}", thread_index, name, response.text
+            "Worker #{} - {}: Received response: {}", thread_index, name, response.text
         )
-
-        self.waiting_thread_index = -1
 
         # There are 2 different JSON keys for responses to get the next timestamp.
         # If we don't get data, it means we've been rate limited.
@@ -230,7 +228,7 @@ class PlaceClient:
                 response.json()["errors"][0]["extensions"]["nextAvailablePixelTs"]
             )
             logger.error(
-                "Thread #{} - {}: Failed placing pixel: rate limited",
+                "Worker #{} - {}: Failed placing pixel: rate limited",
                 thread_index,
                 name,
             )
@@ -241,11 +239,9 @@ class PlaceClient:
                 ]
             )
             logger.success(
-                "Thread #{} - {}: Succeeded placing pixel", thread_index, name
+                "Worker #{} - {}: Succeeded placing pixel", thread_index, name
             )
-            self.recently_placed.append(((x, y), color_index_in))
-            if (len(self.recently_placed) > len(self.access_tokens)):
-                del self.recently_placed[-1]
+            success = True
 
         # THIS COMMENTED CODE LETS YOU DEBUG THREADS FOR TESTING
         # Works perfect with one thread.
@@ -253,7 +249,7 @@ class PlaceClient:
         # Move the code anywhere you want, I put it here to inspect the API responses.
 
         # Reddit returns time in ms and we need seconds, so divide by 1000
-        return waitTime / 1000
+        return waitTime / 1000, success
 
     def get_board(self, access_token_in):
         logger.debug("Connecting and obtaining board images")
@@ -411,98 +407,60 @@ class PlaceClient:
 
         return new_img
 
-    def get_unset_pixel(self, x, y, index):
-        originalX = x
-        originalY = y
-        loopedOnce = False
-        imgOutdated = True
-        wasWaiting = False
+    def get_unset_pixels(self, access_token_in):
+        result = []
+        x = 0
+        y = 0
 
-        while True:
-            time.sleep(0.05)
-            if self.waiting_thread_index != -1 and self.waiting_thread_index != index:
-                x = originalX
-                y = originalY
-                loopedOnce = False
-                imgOutdated = True
-                wasWaiting = True
-                continue
+        if time.time() >= self.board_expires_at:
+            boardimg = self.get_board(access_token_in)
+            self.board = boardimg.convert("RGB").load()
+            self.board_expires_at = time.time() + 120
 
-            # Stagger reactivation of threads after wait
-            if wasWaiting:
-                wasWaiting = False
-                time.sleep(index * self.delay_between_launches)
-
-            if x >= self.image_size[0]:
-                y += 1
-                x = 0
-
-            if y >= self.image_size[1]:
-
-                y = 0
-
-            if x == originalX and y == originalY and loopedOnce:
-                logger.info(
-                    "Thread #{} : All pixels correct, trying again in 10 seconds... ",
-                    index,
-                )
-                self.waiting_thread_index = index
-                time.sleep(10)
-                imgOutdated = True
-
-            if imgOutdated:
-                boardimg = self.get_board(self.access_tokens[index][0])
-                pix2 = boardimg.convert("RGB").load()
-                imgOutdated = False
-            else:
-                for pos, color_id in self.recently_placed:
-                    rgb = ColorMapper.color_id_to_rgb(color_id)
-                    pix2[pos[0], pos[1]] = rgb
-                    
-
-            logger.debug("ABS X{} Y{}", x + self.pixel_x_start, y + self.pixel_y_start)
-            logger.debug(
-                "REL X{}/{} Y{}/{}", x, self.image_size[0], y, self.image_size[1]
-            )
-
-            target_rgb = self.pix[x, y]
-
-            new_rgb = ColorMapper.closest_color(
-                target_rgb, self.rgb_colors_array, self.legacy_transparency
-            )
-            if pix2[x + self.pixel_x_start, y + self.pixel_y_start] != new_rgb:
+        for x in range(self.image_size[0]):
+            for y in range(self.image_size[0]):
+                logger.debug("ABS X{} Y{}", x + self.pixel_x_start, y + self.pixel_y_start)
                 logger.debug(
-                    "{}, {}, {}, {}",
-                    pix2[x + self.pixel_x_start, y + self.pixel_y_start],
-                    new_rgb,
-                    new_rgb != (69, 42, 0),
-                    pix2[x, y] != new_rgb,
+                    "REL X{}/{} Y{}/{}", x, self.image_size[0], y, self.image_size[1]
                 )
 
-                # (69, 42, 0) is a special color reserved for transparency.
-                if target_rgb[3] == 0 or new_rgb == (69, 42, 0):
-                    logger.trace(
-                        "Transparent Pixel at {}, {} skipped",
-                        x + self.pixel_x_start,
-                        y + self.pixel_y_start,
-                    )
-                else:
+                target_rgb = self.pix[x, y]
+
+                new_rgb = ColorMapper.closest_color(
+                    target_rgb, self.rgb_colors_array, self.legacy_transparency
+                )
+                if self.board[x + self.pixel_x_start, y + self.pixel_y_start] != new_rgb:
                     logger.debug(
-                        "Thread #{} : Replacing {} pixel at: {},{} with {} color",
-                        index,
-                        pix2[x + self.pixel_x_start, y + self.pixel_y_start],
-                        x + self.pixel_x_start,
-                        y + self.pixel_y_start,
+                        "{}, {}, {}, {}",
+                        self.board[x + self.pixel_x_start, y + self.pixel_y_start],
                         new_rgb,
+                        new_rgb != (69, 42, 0),
+                        self.board[x, y] != new_rgb,
                     )
-                    break
-            x += 1
-            loopedOnce = True
-        return x, y, new_rgb
+
+                    # (69, 42, 0) is a special color reserved for transparency.
+                    if target_rgb[3] == 0 or new_rgb == (69, 42, 0):
+                        logger.trace(
+                            "Transparent Pixel at {}, {} skipped",
+                            x + self.pixel_x_start,
+                            y + self.pixel_y_start,
+                        )
+                    else:
+                        logger.debug(
+                            "Replacing {} pixel at: {},{} with {} color",
+                            self.board[x + self.pixel_x_start, y + self.pixel_y_start],
+                            x + self.pixel_x_start,
+                            y + self.pixel_y_start,
+                            new_rgb,
+                        )
+                        result.append((x, y, new_rgb))
+                        break
+
+        return result
 
     # Draw the input image
     def main_thread(self, workers):
-        id_names = list(enumerate(workers))
+        id_names = dict(enumerate(workers))
 
         if self.unverified_place_frequency:
             pixel_place_frequency = 1230
@@ -524,80 +482,78 @@ class PlaceClient:
                 exit(1)
 
         while True:
-            for index, name in id_names:
-                worker = workers[name]
+            targets: list = self.get_unset_pixels()
 
-                if not worker["active"]:
-                    continue
+            if len(targets) == 0:
+                time.sleep(15)
+            else:
+                target = targets.pop(0)
 
-                # reduce CPU usage
-                time.sleep(1)
+                for index, name in id_names:
+                    worker = workers[name]
 
-                # get the current time
-                current_timestamp = math.floor(time.time())
+                    if not worker["active"] or target is None:
+                        continue
 
-                # log next time until drawing
-                time_until_next_draw = worker["next_draw_time"] - current_timestamp
+                    # reduce CPU usage
+                    time.sleep(1)
 
-                if time_until_next_draw > 10000:
-                    logger.warning(
-                        "Worker #{} - {} :: CANCELLED :: Rate-Limit Banned", index, name
-                    )
-                    worker["active"] = False
+                    # get the current time
+                    current_timestamp = math.floor(time.time())
 
-                self.refresh_token(index, name, worker)
+                    # log next time until drawing
+                    time_until_next_draw = worker["next_draw_time"] - current_timestamp
 
-                # draw pixel onto screen
-                if self.access_tokens.get(index) is not None and (
-                    current_timestamp >= worker["next_draw_time"]
-                    or self.first_run_counter <= index
-                ):
+                    if time_until_next_draw > 10000:
+                        logger.warning(
+                            "Worker #{} - {} :: CANCELLED :: Rate-Limit Banned", index, name
+                        )
+                        worker["active"] = False
 
-                    # place pixel immediately
-                    # first_run = False
-                    self.first_run_counter += 1
+                    self.refresh_token(index, name, worker)
 
-                    # get target color
-                    # target_rgb = pix[current_r, current_c]
+                    # draw pixel onto screen
+                    if self.access_tokens.get(index) is not None and (
+                        current_timestamp >= worker["next_draw_time"]
+                        or self.first_run_counter <= index
+                    ):
 
-                    # get current pixel position from input image and replacement color
-                    current_r, current_c, new_rgb = self.get_unset_pixel(
-                        current_r,
-                        current_c,
-                        index,
-                    )
+                        # place pixel immediately
+                        # first_run = False
+                        self.first_run_counter += 1
 
-                    # get converted color
-                    new_rgb_hex = ColorMapper.rgb_to_hex(new_rgb)
-                    pixel_color_index = ColorMapper.COLOR_MAP[new_rgb_hex]
+                        # get target color
+                        # target_rgb = pix[current_r, current_c]
 
-                    logger.info("Account Placing: {}", name)
+                        # get current pixel position from input image and replacement color
+                        current_r, current_c, new_rgb = target
 
-                    # draw the pixel onto r/place
-                    # There's a better way to do this
-                    pixel_x_start = self.pixel_x_start + current_r
-                    pixel_y_start = self.pixel_y_start + current_c
+                        # get converted color
+                        new_rgb_hex = ColorMapper.rgb_to_hex(new_rgb)
+                        pixel_color_index = ColorMapper.COLOR_MAP[new_rgb_hex]
 
-                    # draw the pixel onto r/place
-                    worker["next_draw_time"] = self.set_pixel_and_check_ratelimit(
-                        self.access_tokens[index][0],
-                        pixel_x_start,
-                        pixel_y_start,
-                        name,
-                        pixel_color_index,
-                        index,
-                    )
+                        logger.info("Account Placing: {}", name)
 
-                    current_r += 1
+                        # draw the pixel onto r/place
+                        # There's a better way to do this
+                        pixel_x_start = self.pixel_x_start + current_r
+                        pixel_y_start = self.pixel_y_start + current_c
 
-                    # go back to first column when reached end of a row while drawing
-                    if current_r >= self.image_size[0]:
-                        current_r = 0
-                        current_c += 1
+                        # draw the pixel onto r/place
+                        worker["next_draw_time"], success = self.set_pixel_and_check_ratelimit(
+                            self.access_tokens[index][0],
+                            pixel_x_start,
+                            pixel_y_start,
+                            name,
+                            pixel_color_index,
+                            index,
+                        )
 
-                    # exit when all pixels drawn
-                    if current_c >= self.image_size[1]:
-                        logger.info("Worker #{} :: image completed", index)
+                        if success:
+                            if len(targets) > 0:
+                                target = targets.pop(0)
+                            else:
+                                target = None
 
     def start(self):
         threading.Thread(
