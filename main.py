@@ -417,8 +417,8 @@ class PlaceClient:
             self.board = boardimg.convert("RGB").load()
             self.board_expires_at = time.time() + 120
 
-        for x in range(self.image_size[0]):
-            for y in range(self.image_size[0]):
+        for y in range(self.image_size[1]):
+            for x in range(self.image_size[0]):
                 logger.debug("ABS X{} Y{}", x + self.pixel_x_start, y + self.pixel_y_start)
                 logger.debug(
                     "REL X{}/{} Y{}/{}", x, self.image_size[0], y, self.image_size[1]
