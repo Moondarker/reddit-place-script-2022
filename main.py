@@ -1,5 +1,5 @@
 import math
-from random import random
+import random
 
 import requests
 import json
@@ -418,9 +418,10 @@ class PlaceClient:
         y = 0
 
         if time.time() >= self.board_expires_at:
+            logger.info('Updating map')
             boardimg = self.get_board(access_token_in)
             self.board = boardimg.convert("RGB").load()
-            self.board_expires_at = time.time() + 120
+            self.board_expires_at = time.time() + 30
 
         for y in range(self.image_size[1]):
             for x in range(self.image_size[0]):
@@ -492,7 +493,7 @@ class PlaceClient:
             pickle.dump(self.access_tokens, secrets)
 
         while True:
-            targets: list = self.get_unset_pixels(self.access_tokens.get(0)[0])
+            targets: list = self.get_unset_pixels(random.choice(self.access_tokens)[0])
 
             if len(targets) == 0:
                 time.sleep(15)
