@@ -473,6 +473,8 @@ class PlaceClient:
             worker["active"] = True
             worker["next_draw_time"] = math.floor(time.time()) + pixel_place_frequency
 
+            self.refresh_token(index, name, worker)
+
             try:
                 # Current pixel row and pixel column being drawn
                 current_r = worker["start_coords"][0]
@@ -482,7 +484,7 @@ class PlaceClient:
                 exit(1)
 
         while True:
-            targets: list = self.get_unset_pixels()
+            targets: list = self.get_unset_pixels(self.access_tokens.get(0)[0])
 
             if len(targets) == 0:
                 time.sleep(15)
