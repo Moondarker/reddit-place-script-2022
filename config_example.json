@@ -1,6 +1,6 @@
 {
-    "image_path": "image.jpg",
-    "image_start_coords": [741, 610],
+    "image_path": "images/const_small.png",
+    "image_start_coords": [1784, 34],
     "legacy_transparency": true,
     "thread_delay": 2,
     "unverified_place_frequency": false,
