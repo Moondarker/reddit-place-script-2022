@@ -5,6 +5,8 @@ import requests
 import json
 import time
 import threading
+import pickle
+import os
 import sys
 from io import BytesIO
 from http import HTTPStatus
@@ -60,6 +62,9 @@ class PlaceClient:
 
         # Auth
         self.access_tokens = {}
+        if os.path.exists('./secrets.bin'):
+            with open('secrets.bin', 'rb') as secrets:
+                self.access_tokens = pickle.load(secrets)
 
         # Image information
         self.pix = None
@@ -482,6 +487,9 @@ class PlaceClient:
             except Exception:
                 logger.info("You need to provide start_coords to worker '{}'", name)
                 exit(1)
+        
+        with open('secrets.bin', 'wb') as secrets:
+            pickle.dump(self.access_tokens, secrets)
 
         while True:
             targets: list = self.get_unset_pixels(self.access_tokens.get(0)[0])
