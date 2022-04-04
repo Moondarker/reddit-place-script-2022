@@ -303,8 +303,8 @@ class PlaceClient:
                     logger.debug("Connected to WebSocket server")
                     break
             except WSExceptions.WebSocketConnectionClosedException as e:
-                logger.error("WebSocket connection dropped abruptly. Checking saved tokens.")
-                self.refresh_tokens()
+                logger.error("WebSocket connection dropped abruptly. Nuking saved tokens.")
+                self.refresh_tokens(True)
                 return self.get_board(random.choice(self.access_tokens)[0])
 
         logger.debug("Obtaining Canvas information")
