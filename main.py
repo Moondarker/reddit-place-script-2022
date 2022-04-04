@@ -501,21 +501,19 @@ class PlaceClient:
         return x, y, new_rgb
 
     # Draw the input image
-    def task(self, index, name, worker):
-        # Whether image should keep drawing itself
-        repeat_forever = True
+    def main_thread(self, workers):
+        id_names = list(enumerate(workers))
 
-        while True:
-            # last_time_placed_pixel = math.floor(time.time())
+        if self.unverified_place_frequency:
+            pixel_place_frequency = 1230
+        else:
+            pixel_place_frequency = 330
 
-            # note: Reddit limits us to place 1 pixel every 5 minutes, so I am setting it to
-            # 5 minutes and 30 seconds per pixel
-            if self.unverified_place_frequency:
-                pixel_place_frequency = 1230
-            else:
-                pixel_place_frequency = 330
+        for index, name in id_names:
+            worker = workers[name]
 
-            next_pixel_placement_time = math.floor(time.time()) + pixel_place_frequency
+            worker["active"] = True
+            worker["next_draw_time"] = math.floor(time.time()) + pixel_place_frequency
 
             try:
                 # Current pixel row and pixel column being drawn
@@ -525,11 +523,13 @@ class PlaceClient:
                 logger.info("You need to provide start_coords to worker '{}'", name)
                 exit(1)
 
-            # Time until next pixel is drawn
-            update_str = ""
+        while True:
+            for index, name in id_names:
+                worker = workers[name]
 
-            # Refresh auth tokens and / or draw a pixel
-            while True:
+                if not worker["active"]:
+                    continue
+
                 # reduce CPU usage
                 time.sleep(1)
 
@@ -537,33 +537,19 @@ class PlaceClient:
                 current_timestamp = math.floor(time.time())
 
                 # log next time until drawing
-                time_until_next_draw = next_pixel_placement_time - current_timestamp
+                time_until_next_draw = worker["next_draw_time"] - current_timestamp
 
                 if time_until_next_draw > 10000:
                     logger.warning(
-                        "Thread #{} - {} :: CANCELLED :: Rate-Limit Banned", index, name
+                        "Worker #{} - {} :: CANCELLED :: Rate-Limit Banned", index, name
                     )
-                    repeat_forever = False
-                    break
-
-                new_update_str = (
-                    f"{time_until_next_draw} seconds until next pixel is drawn"
-                )
-
-                if update_str != new_update_str and time_until_next_draw % 10 == 0:
-                    update_str = new_update_str
-                else:
-                    update_str = ""
-
-                if len(update_str) > 0:
-                    if not self.compactlogging:
-                        logger.info("Thread #{} - {}: {}", index, name, update_str)
+                    worker["active"] = False
 
                 self.refresh_token(index, name, worker)
 
                 # draw pixel onto screen
                 if self.access_tokens.get(index) is not None and (
-                    current_timestamp >= next_pixel_placement_time
+                    current_timestamp >= worker["next_draw_time"]
                     or self.first_run_counter <= index
                 ):
 
@@ -593,7 +579,7 @@ class PlaceClient:
                     pixel_y_start = self.pixel_y_start + current_c
 
                     # draw the pixel onto r/place
-                    next_pixel_placement_time = self.set_pixel_and_check_ratelimit(
+                    worker["next_draw_time"] = self.set_pixel_and_check_ratelimit(
                         self.access_tokens[index][0],
                         pixel_x_start,
                         pixel_y_start,
@@ -611,20 +597,13 @@ class PlaceClient:
 
                     # exit when all pixels drawn
                     if current_c >= self.image_size[1]:
-                        logger.info("Thread #{} :: image completed", index)
-                        break
-
-            if not repeat_forever:
-                break
+                        logger.info("Worker #{} :: image completed", index)
 
     def start(self):
-        for index, worker in enumerate(self.json_data["workers"]):
-            threading.Thread(
-                target=self.task,
-                args=[index, worker, self.json_data["workers"][worker]],
-            ).start()
-            # exit(1)
-            time.sleep(self.delay_between_launches)
+        threading.Thread(
+            target=self.main_thread,
+            args=[self.json_data["workers"]],
+        ).start()
 
 
 @click.command()
