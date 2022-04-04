@@ -260,6 +260,7 @@ class PlaceClient:
             logger.success(
                 "Worker #{} - {}: Succeeded placing pixel", thread_index, name
             )
+            self.board[x, y] = ColorMapper.color_id_to_rgb(color_index_in)
             success = True
 
         # THIS COMMENTED CODE LETS YOU DEBUG THREADS FOR TESTING
@@ -480,7 +481,6 @@ class PlaceClient:
                             new_rgb,
                         )
                         result.append((x, y, new_rgb))
-                        break
 
         return result
 
