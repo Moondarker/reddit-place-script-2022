@@ -11,6 +11,7 @@ import sys
 from io import BytesIO
 from http import HTTPStatus
 from websocket import create_connection
+from websocket import _exceptions as WSExceptions
 from PIL import Image
 
 from loguru import logger
@@ -158,6 +159,19 @@ class PlaceClient:
                     self.access_tokens.get(index)[0][:5],
                 )
 
+    def refresh_tokens(self, reset=False):
+        id_names = list(enumerate(self.json_data["workers"]))
+
+        if reset:
+            self.access_tokens = {}
+
+        for index, name in id_names:
+            worker = self.json_data["workers"][name]
+            self.refresh_token(index, name, worker)
+        
+        with open('secrets.bin', 'wb') as secrets:
+            pickle.dump(self.access_tokens, secrets)
+
     # Draw a pixel at an x, y coordinate in r/place with a specific color
 
     def set_pixel_and_check_ratelimit(
@@ -280,13 +294,19 @@ class PlaceClient:
             )
         )
         while True:
-            msg = ws.recv()
-            if msg is None:
-                logger.error("Reddit failed to acknowledge connection_init")
-                exit()
-            if msg.startswith('{"type":"connection_ack"}'):
-                logger.debug("Connected to WebSocket server")
-                break
+            try:
+                msg = ws.recv()
+                if msg is None:
+                    logger.error("Reddit failed to acknowledge connection_init")
+                    exit()
+                if msg.startswith('{"type":"connection_ack"}'):
+                    logger.debug("Connected to WebSocket server")
+                    break
+            except WSExceptions.WebSocketConnectionClosedException as e:
+                logger.error("WebSocket connection dropped abruptly. Checking saved tokens.")
+                self.refresh_tokens()
+                return self.get_board(random.choice(self.access_tokens)[0])
+
         logger.debug("Obtaining Canvas information")
         ws.send(
             json.dumps(
