@@ -496,7 +496,7 @@ class PlaceClient:
             targets: list = self.get_unset_pixels(random.choice(self.access_tokens)[0])
 
             if len(targets) == 0:
-                time.sleep(15)
+                time.sleep(5)
             else:
                 target = targets.pop(0)
 
@@ -507,7 +507,7 @@ class PlaceClient:
                         continue
 
                     # reduce CPU usage
-                    time.sleep(1)
+                    time.sleep(0.25)
 
                     # get the current time
                     current_timestamp = math.floor(time.time())
