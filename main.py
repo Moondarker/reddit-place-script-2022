@@ -130,10 +130,10 @@ class PlaceClient:
                 proxies=proxy.get_random_proxy(self),
             )
             if r.status_code != 200:
-                print("Authorization failed!")  # password is probably invalid
+                print("Authorization failed: {}!" % username)  # password is probably invalid
                 return
             else:
-                print("Authorization successful!")
+                print("Authorization successful: {}!" % username)
             print("Obtaining access token...")
             r = client.get("https://www.reddit.com/")
             data_str = (
