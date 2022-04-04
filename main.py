@@ -460,7 +460,7 @@ class PlaceClient:
 
     # Draw the input image
     def main_thread(self, workers):
-        id_names = dict(enumerate(workers))
+        id_names = list(enumerate(workers))
 
         if self.unverified_place_frequency:
             pixel_place_frequency = 1230
